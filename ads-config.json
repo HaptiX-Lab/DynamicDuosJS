@@ -1,0 +1,13 @@
+{
+    "subscriptions" : 
+    [
+        {"symbol" : "GVL.MAIN_SYSTEM_TIME", "tctype":"UDINT", "cycleTime" : 1},
+        {"symbol" : "GVL.ENCODER_1_DEGREES", "tctype":"REAL", "cycleTime" : 1},
+        {"symbol" : "GVL.LOAD_CELL_NEWTONS", "tctype":"REAL", "cycleTime" : 1}
+    ],
+    "modifiers" : 
+    [
+        {"symbol" : "MAIN.MASTER_STATE", "tctype" : "MASTERSTATETYPE"},
+        {"symbol" : "MainExperimentBlock.bDemoMode", "tctype": "BOOL"}
+    ]
+}
