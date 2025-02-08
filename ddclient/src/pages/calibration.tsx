@@ -8,22 +8,43 @@ import { Button } from "@heroui/button";
 import { WebSocketContext } from "@/components/WebSocketContext"; 
 import { useContext, useCallback, useEffect } from "react"; 
 import { switchToCalibration, switchToWaiting } from "@/functions/plc-mode-change";
-import { ReactFlow } from "@xyflow/react"; 
+import { Select, SelectItem } from "@heroui/select"; 
+import type { SharedSelection } from "@heroui/system";
+import { useNavigate } from "react-router-dom"; 
 
-
+// TODO: 
+// move necessary child props into the parent 
+// Make sure that data is saved automatically based on selected participant
 
 const UserSelection = () => {
+    let navigate = useNavigate(); 
+    const [participant, setParticipant] = useState<SharedSelection>(); 
+
+    useEffect(() => {
+        if (participant?.currentKey === 'createNew') {
+            navigate('/participant-setup')
+        }
+    }, [participant]);
+    
     return (
         <div className="container mx-auto pt-12">
             <h1 className="text-2xl">Select a registered participant. </h1> 
             <Divider className="my-4" />
             <div className="grid grid-cols-2 lg:gap-2 gap-6">
+                <Select
+                    className="max-w-md"
+                    label="Participant"
+                    placeholder="Select a participant"
+                    selectedKeys={participant}
+                    onSelectionChange={setParticipant} 
+
+                >
+                    <SelectItem key={"createNew"} className="text-primary-600">Create a new participant</SelectItem>
+                </Select>
             </div>
         </div>
     )
 }
-
-
 
 interface ST_CalibrationSettings { // this is the actual struct as defined on the PLC
     bTestTypeHuman: boolean;

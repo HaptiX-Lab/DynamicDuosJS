@@ -23,6 +23,7 @@
     "@heroui/navbar": "2.2.8",
     "@heroui/popover": "^2.3.10",
     "@heroui/radio": "^2.3.9",
+    "@heroui/select": "^2.4.10",
     "@heroui/slider": "^2.4.8",
     "@heroui/snippet": "2.2.10",
     "@heroui/switch": "2.2.8",
