@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors'); 
+const fs = require('fs'); 
 const { Client } = require('ads-client'); 
 const path = require('path');
 const bodyParser = require('body-parser');
@@ -10,6 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 const config = require('./ads-config.json'); 
+const { errorMonitor } = require('events');
 
 // Parse JSON bodies
 app.use(bodyParser.json(), cors({origin:'http://localhost:5174'})); // Support the frontend
@@ -161,6 +163,150 @@ app.post('/ads-write-value', async (req, res) => {
             status: 'FAILURE', 
             message: `Failed to write value to ${channel}`,
             error: err.message
+        });
+    }
+})
+
+app.get('/ads-read-value', async (req, res) => {
+    const { channel } = req.body; 
+
+    // Validate the channel input
+    if (!channel) {
+        return res.status(400).json({
+            type: 'CONFIRMATION', 
+            status: 'FAILURE', 
+            message: 'Missing "channel" in request body'
+        });
+    }
+
+    try {
+        // Attempt to read the value from the ADS server
+        const result = await adsClient.readValue(channel);
+
+        // Respond with the data
+        return res.status(200).json({
+            type: 'CONFIRMATION', 
+            status: 'SUCCESS', 
+            message: `Value successfully read from ${channel}`, 
+            value: result
+        });
+    } catch (err) {
+        console.error("Failed to read value to ADS:", err); 
+    }
+
+    return res.status(500).json({
+        type: 'CONFIRMATION', 
+        status: 'FAILURE', 
+        message: `Failed to read value from ${channel}`, 
+        error: err.message
+    })
+})
+
+app.get('/save-calibration-log', async (req, res) => {
+    const { user } = req.body; 
+
+    // For now, pass validation of the channel input
+    // First thing we need to do is get the number of steps so far
+    try {
+        // const res = await adsClient.invokeRpcMethod('MAIN_DOCILE.fbCalibrationBlock.fbLogger', 'getLogChunk', {
+        //     nChunkIndex: 0
+        // });
+
+        // console.log("Got returned value: ", res); 
+        // // res.returnValue.aChunk
+        // console.log("First four values"); 
+        // for (let i = 0; i < 4; i++) {
+        //     console.log(res.returnValue.aChunk[i]);
+        // }
+
+        const res = await adsClient.invokeRpcMethod('MAIN_DOCILE.fbCalibrationBlock.fbLogger', 'getLogSize');
+
+        //console.log("Got the following output from log size poll: ", res); 
+
+        const numLogChunks = res?.outputs?.nNumLogChunks; 
+        const chunkSize = res?.outputs?.nCurrentChunkSize; 
+        let bytesRead = 0; 
+        let bytesRead_20 = 0; // last 20 chunk bytes read
+        let bandwidth = 0; 
+
+        console.log("Current chunk size is ", chunkSize); 
+        console.log("Attempting to read ", numLogChunks, " chunks."); 
+        let chunkTime = Date.now();  
+        let totalTime = Date.now(); 
+        let dt; 
+        for (let i = 0; i < numLogChunks; i++) {
+            const chunk = await adsClient.invokeRpcMethod('MAIN_DOCILE.fbCalibrationBlock.fbLogger', 'getLogChunk', {
+                nChunkIndex: i
+            });
+            bytesRead += chunk.returnValue.nChunkSizeBytes; 
+            bytesRead_20 += chunk.returnValue.nChunkSizeBytes; 
+            if (i % 20 == 0) {
+                dt = (Date.now() - chunkTime); 
+                bandwidth = bytesRead_20 / dt; 
+                //console.log("Over last 20 chunks, avg time per chunk was: ", dt, "ms. Avg bandwidth: ", bandwidth*1000/1e6, " MB/sec"); 
+                chunkTime = Date.now(); 
+                bytesRead_20 = 0; 
+            }
+        }
+        
+        totalTime = Date.now() - totalTime; 
+        console.log(`Finished. took: ${totalTime}ms`);
+        console.log("Total data transferred : ", bytesRead/1e6, " MB. Avg bandwidth: ", (bytesRead/totalTime)*1000/1e6, " MB/sec")
+    } catch (err) {
+        console.error("Failed to initiate log save. Err: ", err); 
+    }
+})
+
+app.post('/create-user', async (req, res) => {
+    try {
+        const { name, genderID, notes } = req.body; 
+
+        // Validate that a name was provided 
+        if (!name || !genderID || !notes) { 
+            return res.status(400).json({
+                type: 'CONFIRMATION', 
+                status: 'FAILURE', 
+                message: `You are one or many fields (name, genderID, notes) in your request.`
+            })
+        }
+
+        // Build the filepath to the participants.json file
+        const filePath = path.join(__dirname, 'data', 'participants.json'); 
+
+        // Read the file contents 
+        const fileContent = await fs.promises.readFile(filePath, 'utf-8');
+
+        // Parse the JSON data
+        const data = JSON.parse(fileContent); 
+
+        // Ensure the registered_users key exists and is an array 
+        if (!Array.isArray(data.registered_users)) {
+            data.registered_users = [];
+        }
+
+        // Create the new user object 
+        const newUser = {
+            id: DataTransfer.now(), 
+            name, 
+            genderID,
+            notes,
+            createdAt: new Date().toISOString()
+        };
+
+        // Append the new user to the registered_users array 
+        data.registered_users.push(newUser); 
+
+        // Write the updated data back to the file with pretty-print formatting 
+        await fs.promises.writeFile(filePath, JSON.stringify(data, null, 2)); 
+
+        // Respond with the newly created user
+        res.status(201).json(newUser); 
+    } catch (error) {
+        console.error('Error createing user: ', error); 
+        res.status(500).json({
+            type: 'CONFIRMATION', 
+            status: 'FAILURE', 
+            error:error
         });
     }
 })

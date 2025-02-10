@@ -3,7 +3,7 @@ import { Divider } from "@heroui/divider";
 import { Input } from "@heroui/input";
 import { Checkbox } from "@heroui/checkbox";
 import { Slider } from "@heroui/slider"; 
-import { useState } from "react";
+import React, { useState } from "react";
 import { Button } from "@heroui/button";  
 import { WebSocketContext } from "@/components/WebSocketContext"; 
 import { useContext, useCallback, useEffect } from "react"; 
@@ -16,15 +16,20 @@ import { useNavigate } from "react-router-dom";
 // move necessary child props into the parent 
 // Make sure that data is saved automatically based on selected participant
 
-const UserSelection = () => {
-    let navigate = useNavigate(); 
-    const [participant, setParticipant] = useState<SharedSelection>(); 
+interface UserSelectionProps {
+    participant: SharedSelection | undefined; 
+    setParticipant: React.Dispatch<React.SetStateAction<SharedSelection | undefined>>;
+}
 
-    useEffect(() => {
-        if (participant?.currentKey === 'createNew') {
-            navigate('/participant-setup')
-        }
-    }, [participant]);
+const UserSelection: React.FC<UserSelectionProps> = ({ participant, setParticipant }) => {
+    // let navigate = useNavigate(); 
+    // const [participant, setParticipant] = useState<SharedSelection>(); 
+
+    // useEffect(() => {
+    //     if (participant?.currentKey === 'createNew') {
+    //         navigate('/participant-setup')
+    //     }
+    // }, [participant]);
     
     return (
         <div className="container mx-auto pt-12">
@@ -57,33 +62,30 @@ interface ST_CalibrationSettings { // this is the actual struct as defined on th
     aGripSchedule : Array<number>; 
 }
 
-const SettingsSection = () => {
-    const [config, setConfig] = useState({
-        testType: "human", 
-        triggerType: "grip", 
-        numTrials: 10, 
-        useManualPulseTimer : false, 
-        manualPulseTimerVal : 0,
-        gripTriggerValueType : "schedule", 
-        constantGripThreshold : 0, 
-        gripThresholdSchedule: "2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25", 
-        pulseType: "adaptive", 
-        constantPulseTorqueVal: 0,
-    })
+interface JS_CalibrationSettings { // This is the config used for setting/rendering,
+    testType: string; 
+    triggerType: string; 
+    numTrials: number; 
+    useManualPulseTimer: boolean; 
+    manualPulseTimerVal: number; 
+    gripTriggerValueType: string; 
+    constantGripThreshold: number; 
+    gripThresholdSchedule: string; 
+    pulseType: string; 
+    constantPulseTorqueVal: number; 
+}
 
+interface SettingsSectionProps {
+    config: JS_CalibrationSettings;
+    setConfig: React.Dispatch<React.SetStateAction<JS_CalibrationSettings>>;
+}
+
+const SettingsSection: React.FC<SettingsSectionProps> = ({config, setConfig}) => {
+    const [configIsUpToDate, setConfigIsUpToDate] = useState(false); // On the PLC
     const updateConfig = (key: string, value: any) => {
         setConfig((prev) => ({...prev, [key]: value}));
+        setConfigIsUpToDate(false); 
     }
-
-    useEffect(() => { // When the page first loads, want to put the PLC in calibration mode. 
-        switchToCalibration()
-            .catch(console.error)
-
-        return () => {
-            switchToWaiting()
-                .catch(console.error)
-        }
-    }, []);
 
     const handleConfigSubmit = useCallback(async () => {
         // Initialize with default values
@@ -117,9 +119,6 @@ const SettingsSection = () => {
         } else if (config.triggerType == "grip") {
             data.aGripSchedule = parseGripSchedule(config.gripThresholdSchedule);
         }
-    
-        // Send over the web socket or handle it here
-        console.log("Final configuration data: ", data);
 
         try {
             const response = await fetch('http://localhost:3001/ads-write-value', {
@@ -135,6 +134,8 @@ const SettingsSection = () => {
 
             if (!response.ok) {
                 throw new Error("Failed to set calibration seetings. Status: " + response.status); 
+            } else {
+                setConfigIsUpToDate(true); 
             }
         } catch(err) {
             console.error("Error sending calibration settings: ", err)
@@ -265,7 +266,7 @@ const SettingsSection = () => {
             </div>
             <div className="pt-10 grid grid-cols-10 gap-8">
                 <Button color="primary" onPress={handleConfigSubmit}>Apply Config</Button>
-                <Button color="success" onPress={handleLaunchTest}>Launch Test</Button>
+                <Button color="success" isDisabled={!configIsUpToDate} onPress={handleLaunchTest}>Launch Test</Button>
             </div>
         </div>
     )
@@ -299,6 +300,9 @@ const CalibrationStateMachine = () => {
             return false;
         } else {
             const calibSequenceState = foundValidMessage[channel] as ICalibSequenceStateChannel;
+            if (calibSequenceState.value === state && state === CalibState.TEST_FINISHED) {
+                console.log("Test finished!");
+            }
             return calibSequenceState.value === state;
         }
     }
@@ -327,11 +331,61 @@ const CalibrationStateMachine = () => {
 
 
 const CalibrationPage = () => {
+    let navigate = useNavigate(); 
+    const [participant, setParticipant] = useState<SharedSelection | undefined>(); 
+    const [config, setConfig] = useState<JS_CalibrationSettings>({
+        testType: "human", 
+        triggerType: "grip", 
+        numTrials: 10, 
+        useManualPulseTimer : false, 
+        manualPulseTimerVal : 0,
+        gripTriggerValueType : "schedule", 
+        constantGripThreshold : 0, 
+        gripThresholdSchedule: "2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25", 
+        pulseType: "adaptive", 
+        constantPulseTorqueVal: 0,
+    })
+
+    // Hook to check if we should redirect (need to define new participant)
+    useEffect(() => {
+        if (participant?.currentKey === 'createNew') {
+            navigate('/participant-setup')
+        }
+    }, [participant]);
+
+    useEffect(() => { // When the page first loads, want to put the PLC in calibration mode. 
+        switchToCalibration()
+            .catch(console.error)
+
+        return () => {
+            switchToWaiting()
+                .catch(console.error)
+        }
+    }, []);
+
+    async function saveCalibrationLog() {
+        try {
+            const response = await fetch('http://localhost:3001/save-calibration-log', {
+                method: 'GET',
+                headers : {
+                    'Content-Type' : 'application/json'
+                },
+            });
+
+            if (!response.ok) {
+                throw new Error("Failed to save log. Status: " + response.status); 
+            }
+        } catch (err) {
+            console.error(err); 
+        }
+    }
+
     return (
         <div>
-            <UserSelection />
-            <SettingsSection />
+            <UserSelection participant={participant} setParticipant={setParticipant}/>
+            <SettingsSection config={config} setConfig={setConfig}/>
             <CalibrationStateMachine /> 
+            <Button onPress={saveCalibrationLog}/>
         </div> 
     )
 }
