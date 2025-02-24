@@ -172,7 +172,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({config, setConfig}) =>
 
     return (
         <div className="container mx-auto pt-12">
-            <h1 className="text-2xl">Configure impedance estimation settings. </h1> 
+            <h1 className="text-2xl">Configure main experiment settings. </h1> 
             <Divider className="my-4" />
             <div className="grid grid-cols-2 lg:gap-2 gap-6">
                 <RadioGroup label="Select test type" orientation="horizontal" value={config.testType} onValueChange={(value) => updateConfig("testType", value)}>
@@ -342,7 +342,7 @@ const CalibrationStateMachine = ({ saveLog, logSaveInProgess }) => {
 }
 
 
-const CalibrationPage = () => {
+const MainExperimentPage = () => {
     let navigate = useNavigate(); 
     const [participant, setParticipant] = useState<SharedSelection | undefined>(); 
     const [config, setConfig] = useState<JS_CalibrationSettings>({
@@ -429,4 +429,4 @@ const CalibrationPage = () => {
     )
 }
 
-export default CalibrationPage;
+export default MainExperimentPage;

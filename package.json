@@ -12,11 +12,20 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@heroui/chip": "^2.2.7",
+    "@heroui/code": "^2.2.7",
+    "@heroui/modal": "^2.2.8",
+    "@heroui/spinner": "^2.2.7",
+    "@heroui/system": "^2.4.7",
+    "@heroui/theme": "^2.4.6",
     "ads-client": "^2.1.0",
     "concurrently": "^9.1.2",
     "cors": "^2.8.5",
     "express": "^4.21.2",
+    "fast-csv": "^5.0.2",
+    "framer-motion": "^12.4.3",
     "nodemon": "^3.1.9",
+    "tailwindcss": "^4.0.6",
     "ws": "^8.18.0"
   }
 }

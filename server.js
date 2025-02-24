@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors'); 
 const fs = require('fs'); 
+const fastCsv = require('fast-csv');
 const { Client } = require('ads-client'); 
 const path = require('path');
 const bodyParser = require('body-parser');
@@ -202,29 +203,61 @@ app.get('/ads-read-value', async (req, res) => {
     })
 })
 
-app.get('/save-calibration-log', async (req, res) => {
-    const { user } = req.body; 
+app.post('/save-calibration-log', async (req, res) => {
+    console.log("Received request to save calibration log..."); 
+    const { userID } = req.body; 
 
-    // For now, pass validation of the channel input
-    // First thing we need to do is get the number of steps so far
+    if (!userID) {
+        return res.status(400).json({
+            type: 'CONFIRMATION', 
+            status: 'FAILURE', 
+            message: 'Missing "userID" in request body'
+        })
+    }
+
+    // Then we should check to see if the userID is found in the participants list
+    // Build the filepath to the participants.json file
+    const filePath = path.join(__dirname, 'data', 'participants.json'); 
+
+    // Read the file contents 
+    const fileContent = await fs.promises.readFile(filePath, 'utf-8');
+
+    // Parse the JSON data
+    const data = JSON.parse(fileContent); 
+    const found = data.registered_users.find((element) => element.id===Number(userID))
+
+    if (!found) {
+        return res.status(404).json({
+            type: 'CONFIRMATION', 
+            status: 'FAILURE', 
+            message: `User with ID ${userID} not found in database.`
+        })
+    } else {
+        console.log(`Found user ${found.name} with ID ${userID}`)
+    }
+
+    let log_id = Date.now(); // This sequence will be unique for all. total time is used for something else
+    const outputDir = path.join(__dirname, 'data', found.name.split(' ').join('_'))
+    const outputFile =  path.join(outputDir, String(log_id)+'.csv')
+    //console.log("Creating output file: ", outputFile) 
+
+    if (!fs.existsSync(outputDir)) {
+        console.log("Creating output directory: ", outputDir)
+        fs.mkdirSync(outputDir, { recursive: true })
+    }
+
+    // Then create the filestream 
+    const writeStream = fs.createWriteStream(outputFile);
+    const csvStream = fastCsv.format({headers: true}); 
+    csvStream.pipe(writeStream);
+
+    let totalTime = Date.now(); 
     try {
-        // const res = await adsClient.invokeRpcMethod('MAIN_DOCILE.fbCalibrationBlock.fbLogger', 'getLogChunk', {
-        //     nChunkIndex: 0
-        // });
 
-        // console.log("Got returned value: ", res); 
-        // // res.returnValue.aChunk
-        // console.log("First four values"); 
-        // for (let i = 0; i < 4; i++) {
-        //     console.log(res.returnValue.aChunk[i]);
-        // }
+        const response = await adsClient.invokeRpcMethod('MAIN_DOCILE.fbCalibrationBlock.fbLogger', 'getLogSize');
 
-        const res = await adsClient.invokeRpcMethod('MAIN_DOCILE.fbCalibrationBlock.fbLogger', 'getLogSize');
-
-        //console.log("Got the following output from log size poll: ", res); 
-
-        const numLogChunks = res?.outputs?.nNumLogChunks; 
-        const chunkSize = res?.outputs?.nCurrentChunkSize; 
+        const numLogChunks = response?.outputs?.nNumLogChunks; 
+        const chunkSize = response?.outputs?.nCurrentChunkSize; 
         let bytesRead = 0; 
         let bytesRead_20 = 0; // last 20 chunk bytes read
         let bandwidth = 0; 
@@ -232,9 +265,9 @@ app.get('/save-calibration-log', async (req, res) => {
         console.log("Current chunk size is ", chunkSize); 
         console.log("Attempting to read ", numLogChunks, " chunks."); 
         let chunkTime = Date.now();  
-        let totalTime = Date.now(); 
         let dt; 
         for (let i = 0; i < numLogChunks; i++) {
+            console.log("Fetching chunk num [", i, "]")
             const chunk = await adsClient.invokeRpcMethod('MAIN_DOCILE.fbCalibrationBlock.fbLogger', 'getLogChunk', {
                 nChunkIndex: i
             });
@@ -243,30 +276,48 @@ app.get('/save-calibration-log', async (req, res) => {
             if (i % 20 == 0) {
                 dt = (Date.now() - chunkTime); 
                 bandwidth = bytesRead_20 / dt; 
-                //console.log("Over last 20 chunks, avg time per chunk was: ", dt, "ms. Avg bandwidth: ", bandwidth*1000/1e6, " MB/sec"); 
                 chunkTime = Date.now(); 
                 bytesRead_20 = 0; 
             }
+            if (i == numLogChunks - 1) {
+                console.log("Last chunk: ", chunk); 
+                console.log("One element from the chunk: ", chunk.returnValue.aChunk[0])
+            }
+            chunk.returnValue.aChunk.forEach(row=> {
+                csvStream.write(row); 
+            });
         }
+        csvStream.end()
+        console.log('Wrote log to: ', outputFile); 
         
         totalTime = Date.now() - totalTime; 
         console.log(`Finished. took: ${totalTime}ms`);
         console.log("Total data transferred : ", bytesRead/1e6, " MB. Avg bandwidth: ", (bytesRead/totalTime)*1000/1e6, " MB/sec")
+        res.status(200).json({
+            type: 'CONFIRMATION', 
+            status: 'SUCCESSS', 
+            message: 'Log has been saved to CSV!' 
+        })
     } catch (err) {
         console.error("Failed to initiate log save. Err: ", err); 
+        res.status(500).json({
+            type: 'ERROR', 
+            status: 'FAILURE',
+            message: 'Failed to save calibration log.' + String(err)
+        })
     }
 })
 
 app.post('/create-user', async (req, res) => {
     try {
-        const { name, genderID, notes } = req.body; 
+        const { name, gender, notes } = req.body; 
 
         // Validate that a name was provided 
-        if (!name || !genderID || !notes) { 
+        if (!name || !gender) { 
             return res.status(400).json({
                 type: 'CONFIRMATION', 
                 status: 'FAILURE', 
-                message: `You are one or many fields (name, genderID, notes) in your request.`
+                message: `You are one or many fields (name, gender) in your request.`
             })
         }
 
@@ -286,14 +337,14 @@ app.post('/create-user', async (req, res) => {
 
         // Create the new user object 
         const newUser = {
-            id: DataTransfer.now(), 
+            id: Date.now(), 
             name, 
-            genderID,
+            gender,
             notes,
             createdAt: new Date().toISOString()
         };
 
-        // Append the new user to the registered_users array 
+        // Append the new user to the registered_users array // 
         data.registered_users.push(newUser); 
 
         // Write the updated data back to the file with pretty-print formatting 
@@ -302,7 +353,7 @@ app.post('/create-user', async (req, res) => {
         // Respond with the newly created user
         res.status(201).json(newUser); 
     } catch (error) {
-        console.error('Error createing user: ', error); 
+        console.error('Error creating user: ', error); 
         res.status(500).json({
             type: 'CONFIRMATION', 
             status: 'FAILURE', 
@@ -310,6 +361,81 @@ app.post('/create-user', async (req, res) => {
         });
     }
 })
+
+app.get('/list-users', async (req, res) => {
+    try {
+        // We wouldn't expect a body for this request. 
+
+        // Build the filepath to the participants.json file
+        const filePath = path.join(__dirname, 'data', 'participants.json'); 
+
+        // Read the file contents 
+        const fileContent = await fs.promises.readFile(filePath, 'utf-8');
+
+        // Parse the JSON data
+        const data = JSON.parse(fileContent); 
+
+        // Ensure the registered_users key exists and is an array 
+        if (!Array.isArray(data.registered_users)) {
+            throw new Error("There are no registered users!")
+        }
+
+        res.status(201).json(data.registered_users);
+
+    } catch (error) {
+        console.error("Error fetching list users: ", error); 
+        res.status(500).json({
+            type: 'CONFIRMATION', 
+            status: 'FAILURE', 
+            error:error
+        });
+    }
+});
+
+app.get('/get-user', async (req, res) => {
+    try {
+        // There will be a body for this request and it will be the userid that we want.
+        const { id } = req.body; 
+
+        // validate the id 
+        if (!id) {
+            return res.status(400).json({
+                type: 'CONFIRMATION', 
+                status: 'FAILURE', 
+                error: 'You must submit an ID with your request.' 
+            })
+        }
+
+        // Then we get the data from the file and send it back 
+        const filePath = path.join(__dirname, 'data', 'participants.json'); 
+
+        // Read the file contents 
+        const fileContent = await fs.promises.readFile(filePath, 'utf-8');
+
+        // Parse the JSON data
+        const data = JSON.parse(fileContent); 
+
+        // Search the array for the data with the corresponding key
+        const found = data.registered_users.find((element) => element.id===id)
+
+        if (!found) {
+            return res.status(404).json({
+                type: 'CONFIRMATION', 
+                status: 'NOT FOUND', 
+                error: `Could not find the user with id ${id} in the database.`
+            });
+        } else {
+            return res.status(200).json(found); 
+        }
+    } catch (error) {
+        console.error("Error fetching user: ", error); 
+        res.status(500).json({
+            type: 'CONFIRMATION', 
+            status: 'FAILURE', 
+            error: 'An unexpected server error occurred.'
+        })
+    }
+});
 
 
 

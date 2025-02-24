@@ -8,6 +8,8 @@ import AboutPage from "@/pages/about";
 import Header from "@/components/header";
 import MonitorPage from "@/pages/monitor";
 import CalibrationPage from "@/pages/calibration";
+import ParticipantPage from "@/pages/participant"; 
+import MainExperimentPage from "./pages/main";
 
 function App() {
   return (
@@ -21,6 +23,8 @@ function App() {
         <Route element={<AboutPage />} path="/about" />
         <Route element={<MonitorPage />} path="/monitor"/>
         <Route element={<CalibrationPage />} path="/impedance-estimation"/>
+        <Route element={<ParticipantPage />} path="/participant-setup" />
+        <Route element={<MainExperimentPage />} path="/main-experiment" />
       </Routes>
     </>
   );
