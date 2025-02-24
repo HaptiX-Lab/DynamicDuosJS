@@ -11,7 +11,11 @@ async function switchToWaiting() {
 }
 
 async function switchToCalibration() {
-    return switchMasterState(PlcMasterState.CALIBRATION)
+    return switchMasterState(PlcMasterState.CALIBRATION);
+}
+
+async function switchToMainExperiment() {
+    return switchMasterState(PlcMasterState.ACTIVE); 
 }
 
 async function switchMasterState(state : Number) {
@@ -36,4 +40,4 @@ async function switchMasterState(state : Number) {
     }
 }
 
-export { switchToWaiting, switchToCalibration };
+export { switchToWaiting, switchToCalibration, switchToMainExperiment };

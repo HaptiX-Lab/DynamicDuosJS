@@ -168,7 +168,7 @@ app.post('/ads-write-value', async (req, res) => {
     }
 })
 
-app.get('/ads-read-value', async (req, res) => {
+app.post('/ads-read-value', async (req, res) => {
     const { channel } = req.body; 
 
     // Validate the channel input
@@ -203,6 +203,19 @@ app.get('/ads-read-value', async (req, res) => {
     })
 })
 
+function generateFilenameTimestamp() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+  
+    const timestamp = `${year}-${month}-${day}_${hours}-${minutes}-${seconds}`;
+    return timestamp;
+}
+
 app.post('/save-calibration-log', async (req, res) => {
     console.log("Received request to save calibration log..."); 
     const { userID } = req.body; 
@@ -236,9 +249,9 @@ app.post('/save-calibration-log', async (req, res) => {
         console.log(`Found user ${found.name} with ID ${userID}`)
     }
 
-    let log_id = Date.now(); // This sequence will be unique for all. total time is used for something else
-    const outputDir = path.join(__dirname, 'data', found.name.split(' ').join('_'))
-    const outputFile =  path.join(outputDir, String(log_id)+'.csv')
+    let log_id = `${found.name.split(' ').join('_')}-calibration-${generateFilenameTimestamp()}` // This sequence will be unique for all. total time is used for something else
+    const outputDir = path.join(__dirname, 'data', found.name.split(' ').join('_'), 'calibration')
+    const outputFile =  path.join(outputDir, (log_id+'.csv'))
     //console.log("Creating output file: ", outputFile) 
 
     if (!fs.existsSync(outputDir)) {
