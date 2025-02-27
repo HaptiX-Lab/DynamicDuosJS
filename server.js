@@ -216,6 +216,99 @@ function generateFilenameTimestamp() {
     return timestamp;
 }
 
+app.post('/save-main-log', async (req, res) => {
+    console.log("Received request to save main experiment log..."); 
+    const { userID } = req.body; 
+
+    if (!userID) {
+        return res.status(400).json({
+            type: 'CONFIRMATION', 
+            status: 'FAILURE', 
+            message: 'Missing "userID" in request body'
+        })
+    }
+
+    const user = await getParticipant(userID); 
+
+    if (!user) {
+        return res.status(404).json({
+            type: 'CONFIRMATION', 
+            status: 'FAILURE', 
+            message: `User with ID ${userID} not found in database.`
+        })
+    } else {
+        console.log(`Found user ${user.name} with ID ${userID}`)
+    }
+
+    let {outputFile, outputDir} = createLogFilepath(user, isCalibrationTrial=false);
+
+    // Then create the filestream 
+    const writeStream = fs.createWriteStream(outputFile);
+    const csvStream = fastCsv.format({headers: true}); 
+    csvStream.pipe(writeStream);
+
+    let totalTime = Date.now(); 
+    try {
+
+        const response = await adsClient.invokeRpcMethod('MAIN_DOCILE.fbMainExperimentBlock.fbLogger', 'getLogSize');
+
+        const numLogChunks = response?.outputs?.nNumLogChunks; 
+        const chunkSize = response?.outputs?.nCurrentChunkSize; 
+        let bytesRead = 0; 
+        let bytesRead_20 = 0; // last 20 chunk bytes read
+        let bandwidth = 0; 
+
+        console.log("Current chunk size is ", chunkSize); 
+        console.log("Attempting to read ", numLogChunks, " chunks."); 
+        let chunkTime = Date.now();  
+        let dt; 
+        for (let i = 0; i < numLogChunks; i++) {
+            console.log("Fetching chunk num [", i, "]")
+            const chunk = await adsClient.invokeRpcMethod('MAIN_DOCILE.fbMainExperimentBlock.fbLogger', 'getLogChunk', {
+                nChunkIndex: i
+            });
+            bytesRead += chunk.returnValue.nChunkSizeBytes; 
+            bytesRead_20 += chunk.returnValue.nChunkSizeBytes; 
+            if (i % 20 == 0) {
+                dt = (Date.now() - chunkTime); 
+                bandwidth = bytesRead_20 / dt; 
+                chunkTime = Date.now(); 
+                bytesRead_20 = 0; 
+            }
+            if (i == numLogChunks - 1) {
+                console.log("Last chunk: ", chunk); 
+                console.log("One element from the chunk: ", chunk.returnValue.aChunk[0])
+            }
+            chunk.returnValue.aChunk.forEach(row=> {
+                csvStream.write(row); 
+            });
+        }
+        csvStream.end()
+        console.log('Wrote log to: ', outputFile); 
+        
+        totalTime = Date.now() - totalTime; 
+        console.log(`Finished. took: ${totalTime}ms`);
+        console.log("Total data transferred : ", bytesRead/1e6, " MB. Avg bandwidth: ", (bytesRead/totalTime)*1000/1e6, " MB/sec")
+        
+        // If we got to the end of the save, let's also clear the log on the PLC: 
+        const clear = await adsClient.invokeRpcMethod('MAIN_DOCILE.fbMainExperimentBlock', 'resetLogAndTest');
+        if (clear) console.log("Log cleared from PLC successfully") 
+        
+        res.status(200).json({
+            type: 'CONFIRMATION', 
+            status: 'SUCCESSS', 
+            message: 'Log has been saved to CSV!' 
+        })
+    } catch (err) {
+        console.error("Failed to initiate log save. Err: ", err); 
+        res.status(500).json({
+            type: 'ERROR', 
+            status: 'FAILURE',
+            message: 'Failed to save calibration log.' + String(err)
+        })
+    }
+})
+
 app.post('/save-calibration-log', async (req, res) => {
     console.log("Received request to save calibration log..."); 
     const { userID } = req.body; 
@@ -228,36 +321,19 @@ app.post('/save-calibration-log', async (req, res) => {
         })
     }
 
-    // Then we should check to see if the userID is found in the participants list
-    // Build the filepath to the participants.json file
-    const filePath = path.join(__dirname, 'data', 'participants.json'); 
+    const user = await getParticipant(userID); 
 
-    // Read the file contents 
-    const fileContent = await fs.promises.readFile(filePath, 'utf-8');
-
-    // Parse the JSON data
-    const data = JSON.parse(fileContent); 
-    const found = data.registered_users.find((element) => element.id===Number(userID))
-
-    if (!found) {
+    if (!user) {
         return res.status(404).json({
             type: 'CONFIRMATION', 
             status: 'FAILURE', 
             message: `User with ID ${userID} not found in database.`
         })
     } else {
-        console.log(`Found user ${found.name} with ID ${userID}`)
+        console.log(`Found user ${user.name} with ID ${userID}`)
     }
 
-    let log_id = `${found.name.split(' ').join('_')}-calibration-${generateFilenameTimestamp()}` // This sequence will be unique for all. total time is used for something else
-    const outputDir = path.join(__dirname, 'data', found.name.split(' ').join('_'), 'calibration')
-    const outputFile =  path.join(outputDir, (log_id+'.csv'))
-    //console.log("Creating output file: ", outputFile) 
-
-    if (!fs.existsSync(outputDir)) {
-        console.log("Creating output directory: ", outputDir)
-        fs.mkdirSync(outputDir, { recursive: true })
-    }
+    let {outputFile, outputDir} = createLogFilepath(user, isCalibrationTrial=true);
 
     // Then create the filestream 
     const writeStream = fs.createWriteStream(outputFile);
@@ -306,6 +382,11 @@ app.post('/save-calibration-log', async (req, res) => {
         totalTime = Date.now() - totalTime; 
         console.log(`Finished. took: ${totalTime}ms`);
         console.log("Total data transferred : ", bytesRead/1e6, " MB. Avg bandwidth: ", (bytesRead/totalTime)*1000/1e6, " MB/sec")
+        
+        // If we got to the end of the save, let's also clear the log on the PLC: 
+        const clear = await adsClient.invokeRpcMethod('MAIN_DOCILE.fbCalibrationBlock', 'resetLogAndTest');
+        if (clear) console.log("Log cleared from PLC successfully") 
+        
         res.status(200).json({
             type: 'CONFIRMATION', 
             status: 'SUCCESSS', 
@@ -320,6 +401,29 @@ app.post('/save-calibration-log', async (req, res) => {
         })
     }
 })
+
+
+async function getParticipant(userID) {
+    const filePath = path.join(__dirname, 'data', 'participants.json');
+    const fileContent = await fs.promises.readFile(filePath, 'utf-8');
+
+    // Parse the JSON data
+    const data = JSON.parse(fileContent); 
+    const found = data.registered_users.find((element) => element.id == Number(userID)); 
+    return found; 
+}
+
+function createLogFilepath(user, isCalibrationTrial) {
+    let log_id = `${user.name.split(' ').join('_')}-${isCalibrationTrial? 'calibration' : 'main'}-${generateFilenameTimestamp()}`
+    const outputDir = path.join(__dirname, 'data', user.name.split(' ').join('_'), (isCalibrationTrial? 'calibration' : 'main'))
+    const outputFile =  path.join(outputDir, (log_id+'.csv'))
+
+    if (!fs.existsSync(outputDir)) {
+        console.log("Creating output directory: ", outputDir)
+        fs.mkdirSync(outputDir, { recursive: true })
+    }
+    return { outputFile, outputDir }
+}
 
 app.post('/create-user', async (req, res) => {
     try {
